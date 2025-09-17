@@ -123,6 +123,29 @@ const UserSchema = new Schema(
       },
     ],
     apprenticeCategories: [{ type: Schema.Types.ObjectId, ref: "Category" }],
+    wioaQuestionnaire: {
+      completed: {
+        type: Boolean,
+        default: false,
+      },
+      completionDate: Date,
+      data: {
+        type: Schema.Types.ObjectId,
+        ref: "WIOAQuestionnaire",
+      },
+    },
+    // Add approval status field
+    approvalStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    approvalDate: Date,
+    approvedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
+    rejectionReason: String,
   },
   { timestamps: true }
 );

@@ -31,6 +31,10 @@ const CourseSchema = new mongoose.Schema({
   thumbnail: { type: String },
   createdAt: { type: Date, default: Date.now },
   modules: [ModuleSchema],
+
+  requiresWIOA: { type: Boolean, default: true },
+  requiresApproval: { type: Boolean, default: true },
+  allowedRoles: [{ type: String, enum: ["apprentice", "employer", "admin"] }],
 });
 
 module.exports = mongoose.model("Course", CourseSchema);
