@@ -19,9 +19,9 @@ router.post("/", userAuth, checkRole(["admin"]), createCourse);
 router.put("/:id", userAuth, checkRole(["admin"]), updateCourse);
 
 // View courses - available to all authenticated users but filtered based on role/approval
-router.get("/", userAuth, getAllCourses);
-router.get("/available", userAuth, getAvailableCourses); // New endpoint for available courses
-router.get("/:id", userAuth, getCourseById);
+router.get("/", userAuth, checkCourseAccess, getAllCourses);
+router.get("/available", userAuth, checkCourseAccess, getAvailableCourses); // New endpoint for available courses
+router.get("/:id", userAuth, checkCourseAccess, getCourseById);
 
 // Apprentice features - with approval check middleware
 router.post(
