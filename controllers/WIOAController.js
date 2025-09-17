@@ -1,6 +1,8 @@
 const User = require("../models/User");
 const WIOAQuestionnaire = require("../models/WIOAQuestionnaire");
 const cloudinary = require("cloudinary").v2;
+const fs = require("fs").promises;
+const path = require("path");
 
 // helper: convert "" to null recursively
 function cleanEmptyStrings(obj) {
@@ -20,6 +22,20 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+// Helper function to clean up files
+async function cleanupFiles(filePaths) {
+  const deletePromises = filePaths.map(async (filePath) => {
+    try {
+      await fs.unlink(filePath);
+      console.log(`Deleted local file: ${filePath}`);
+    } catch (error) {
+      console.error(`Error deleting file ${filePath}:`, error);
+    }
+  });
+
+  await Promise.all(deletePromises);
+}
 
 // Get WIOA questionnaire for a user
 const getQuestionnaire = async (req, res) => {
@@ -50,6 +66,8 @@ const getQuestionnaire = async (req, res) => {
 
 // Create or update WIOA questionnaire
 const saveQuestionnaire = async (req, res) => {
+  let filesToDelete = []; // Track files to clean up
+
   try {
     const userId = req.user._id;
     let questionnaireData = cleanEmptyStrings(req.body);
@@ -74,24 +92,28 @@ const saveQuestionnaire = async (req, res) => {
     if (req.files) {
       // Upload drivers license image if provided
       if (req.files.driversLicenseImage && req.files.driversLicenseImage[0]) {
+        const driversLicenseFile = req.files.driversLicenseImage[0];
         const driversLicenseResult = await cloudinary.uploader.upload(
-          req.files.driversLicenseImage[0].path,
+          driversLicenseFile.path,
           {
             folder: "wioa/drivers-licenses",
           }
         );
         questionnaireData.driversLicenseImage = driversLicenseResult.secure_url;
+        filesToDelete.push(driversLicenseFile.path); // Mark for cleanup
       }
 
       // Upload social security image if provided
       if (req.files.socialSecurityImage && req.files.socialSecurityImage[0]) {
+        const socialSecurityFile = req.files.socialSecurityImage[0];
         const socialSecurityResult = await cloudinary.uploader.upload(
-          req.files.socialSecurityImage[0].path,
+          socialSecurityFile.path,
           {
             folder: "wioa/social-security",
           }
         );
         questionnaireData.socialSecurityImage = socialSecurityResult.secure_url;
+        filesToDelete.push(socialSecurityFile.path); // Mark for cleanup
       }
     }
 
@@ -138,6 +160,9 @@ const saveQuestionnaire = async (req, res) => {
       });
     }
 
+    // Clean up local files after successful processing
+    await cleanupFiles(filesToDelete);
+
     res.status(200).json({
       success: true,
       message: "WIOA questionnaire saved successfully",
@@ -146,6 +171,13 @@ const saveQuestionnaire = async (req, res) => {
     });
   } catch (error) {
     console.error("Error saving WIOA questionnaire:", error);
+
+    // Clean up files even if there's an error
+    try {
+      await cleanupFiles(filesToDelete);
+    } catch (cleanupError) {
+      console.error("Error cleaning up files:", cleanupError);
+    }
 
     if (error.name === "ValidationError") {
       return res.status(400).json({
