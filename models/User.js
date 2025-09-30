@@ -21,6 +21,16 @@ const UserSchema = new Schema(
       required: true,
       trim: true,
     },
+    country: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    city: {
+      type: String,
+      required: true,
+      trim: true,
+    },
     password: {
       type: String,
       required: true,
