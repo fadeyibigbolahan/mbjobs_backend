@@ -31,6 +31,11 @@ const UserSchema = new Schema(
       required: true,
       trim: true,
     },
+    zipCode: {
+      type: String,
+      required: true,
+      trim: true,
+    },
     password: {
       type: String,
       required: true,
@@ -44,6 +49,21 @@ const UserSchema = new Schema(
       enum: ["apprentice", "employer", "admin"],
       required: true,
       default: "apprentice",
+    },
+
+    // Add these fields for region tracking
+    regionEligibility: {
+      isEligible: {
+        type: Boolean,
+        default: false,
+      },
+      county: String,
+      fipsCode: String,
+      lastChecked: {
+        type: Date,
+        default: Date.now,
+      },
+      eligibilityReason: String, // "in_region", "out_of_region", "validation_failed"
     },
 
     subscription: {

@@ -45,6 +45,7 @@ app.use("/api/pricing", require("./routes/pricing"));
 app.use("/api/categories", require("./routes/categoryRoutes"));
 app.use("/api/subscription", require("./routes/subscription"));
 app.use("/api/wioa", require("./routes/WIOARoutes"));
+app.use("/api/orientation-forms", require("./routes/orientationFormRoutes"));
 
 // -------------------- Socket.IO --------------------
 io.on("connection", (socket) => {

@@ -4,6 +4,7 @@ const passport = require("passport");
 const jwt = require("jsonwebtoken");
 const { SECRET, emailAddress } = require("../config");
 const sendVerificationEmail = require("./sendVerificationEmail");
+const { validateZipCode } = require("../utils/zipValidator.js");
 
 /****************************************************************************************************
 REGISTRATION AUTHENTICATION => STARTS
@@ -22,10 +23,30 @@ const userRegister = async (userDets, role, res) => {
       });
     }
 
+    // Validate ZIP code and check region eligibility
+    let zipValidation = { isValid: false, inRegion: false };
+
+    if (userDets.zipCode) {
+      zipValidation = await validateZipCode(userDets.zipCode);
+    }
+
     const hashedPassword = await bcrypt.hash(userDets.password, 12);
     const verificationCode = Math.floor(
       100000 + Math.random() * 900000
     ).toString();
+
+    // Prepare region eligibility data
+    const regionData = {
+      isEligible: zipValidation.inRegion,
+      county: zipValidation.countyName || null,
+      fipsCode: zipValidation.fips || null,
+      lastChecked: new Date(),
+      eligibilityReason: zipValidation.isValid
+        ? zipValidation.inRegion
+          ? "in_region"
+          : "out_of_region"
+        : "validation_failed",
+    };
 
     const newUser = new User({
       ...userDets,
@@ -33,6 +54,7 @@ const userRegister = async (userDets, role, res) => {
       role,
       verificationCode,
       verificationCodeExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
+      regionEligibility: regionData,
     });
 
     const savedUser = await newUser.save();
@@ -49,6 +71,7 @@ const userRegister = async (userDets, role, res) => {
       { expiresIn: "7d" }
     );
 
+    // Return ZIP validation info to frontend along with registration success
     return res.status(201).json({
       role: savedUser.role,
       _id: savedUser._id,
@@ -57,6 +80,15 @@ const userRegister = async (userDets, role, res) => {
       expiresIn: 168,
       message: "Hurry! now you have successfully registered. Please now login.",
       success: true,
+      // Include ZIP validation results for frontend use
+      zipValidation: {
+        isValid: zipValidation.isValid,
+        inRegion: zipValidation.inRegion,
+        county: zipValidation.countyName,
+        reason:
+          zipValidation.reason ||
+          (zipValidation.inRegion ? "in_region" : "out_of_region"),
+      },
     });
   } catch (err) {
     console.error("Registration error:", err);

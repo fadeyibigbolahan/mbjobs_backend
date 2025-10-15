@@ -8,6 +8,7 @@ const {
   deleteJob,
   getMyJobs,
   getAllJobs,
+  getJobApplicants,
 } = require("../controllers/jobController");
 
 const { checkRole, userAuth } = require("../utils/Auth");
@@ -33,5 +34,13 @@ router.put("/:id", userAuth, checkRole(["employer"]), updateJob);
 router.delete("/:id", userAuth, checkRole(["employer"]), deleteJob);
 
 router.get("/employer/jobs", userAuth, checkRole(["employer"]), getMyJobs);
+
+// Add this route to your jobRoutes.js file
+router.get(
+  "/:id/applicants",
+  userAuth,
+  checkRole(["employer"]),
+  getJobApplicants
+);
 
 module.exports = router;

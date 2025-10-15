@@ -7,6 +7,7 @@ const PricingPlan = require("../models/PricingPlan"); // Assuming you have this 
 
 // Create a job
 exports.createJob = async (req, res) => {
+  console.log("create job", req.body);
   try {
     // ✅ Restrict job posting to employers with active subscription
     if (
@@ -228,35 +229,108 @@ exports.getAllJobs = async (req, res) => {
   }
 };
 
-// controllers/jobController.js
-// exports.getAllJobs = async (req, res) => {
-//   try {
-//     const apprenticeId = req.user._id;
+// Get applicants for a specific job
+exports.getJobApplicants = async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const employerId = req.user._id;
 
-//     // 1. Find all job IDs the apprentice has applied for
-//     const applications = await Application.find({
-//       apprentice: apprenticeId,
-//     }).select("job");
-//     const appliedJobIds = applications.map((app) => app.job.toString());
+    // Check if job exists and belongs to the employer
+    const job = await Job.findById(jobId);
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Job not found",
+      });
+    }
 
-//     // 2. Query only jobs the apprentice has NOT applied to, and that are still open & not expired
-//     const jobs = await Job.find({
-//       _id: { $nin: appliedJobIds },
-//       status: "open",
-//       deadline: { $gte: new Date() },
-//     })
-//       .populate("employer", "fullName email")
-//       .sort({ createdAt: -1 });
+    // Verify that the current user owns this job
+    if (job.employer.toString() !== employerId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized access to job applicants",
+      });
+    }
 
-//     res.status(200).json({
-//       success: true,
-//       jobs,
-//     });
-//   } catch (err) {
-//     res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch jobs",
-//       error: err.message,
-//     });
-//   }
-// };
+    // Get all applications for this job with apprentice details
+    const applications = await Application.find({ job: jobId })
+      .populate({
+        path: "apprentice",
+        select:
+          "fullName email phone city country profileImage apprenticeCategories currentEmployment employmentHistory bio approvalStatus",
+        populate: [
+          {
+            path: "apprenticeCategories",
+            select: "name",
+          },
+          {
+            path: "currentEmployment",
+            select: "job employer startDate endDate status",
+            populate: {
+              path: "job",
+              select: "title category",
+            },
+          },
+        ],
+      })
+      .sort({ appliedAt: -1 });
+
+    // Format the response data
+    const applicants = applications.map((app) => ({
+      applicationId: app._id,
+      appliedAt: app.createdAt,
+      status: app.status,
+      coverLetter: app.coverLetter,
+      resume: app.resume,
+      apprentice: {
+        id: app.apprentice._id,
+        fullName: app.apprentice.fullName,
+        email: app.apprentice.email,
+        phone: app.apprentice.phone,
+        city: app.apprentice.city,
+        country: app.apprentice.country,
+        profileImage: app.apprentice.profileImage,
+        bio: app.apprentice.bio,
+        approvalStatus: app.apprentice.approvalStatus,
+        categories:
+          app.apprentice.apprenticeCategories?.map((cat) => cat.name) || [],
+        currentEmployment: app.apprentice.currentEmployment
+          ? {
+              jobTitle: app.apprentice.currentEmployment.job?.title,
+              employer: app.apprentice.currentEmployment.employer,
+              startDate: app.apprentice.currentEmployment.startDate,
+              status: app.apprentice.currentEmployment.status,
+            }
+          : null,
+        employmentHistoryCount: app.apprentice.employmentHistory?.length || 0,
+      },
+    }));
+
+    res.status(200).json({
+      success: true,
+      job: {
+        id: job._id,
+        title: job.title,
+        category: job.category,
+        location: job.location,
+      },
+      applicants: applicants,
+      totalApplicants: applicants.length,
+      stats: {
+        total: applicants.length,
+        pending: applicants.filter((app) => app.status === "pending").length,
+        reviewed: applicants.filter((app) => app.status === "reviewed").length,
+        shortlisted: applicants.filter((app) => app.status === "shortlisted")
+          .length,
+        rejected: applicants.filter((app) => app.status === "rejected").length,
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching job applicants:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch job applicants",
+      error: err.message,
+    });
+  }
+};
