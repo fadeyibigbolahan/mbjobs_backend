@@ -45,8 +45,8 @@ router.post("/create-checkout-session", userAuth, async (req, res) => {
         },
       ],
       mode: "payment",
-      success_url: `http://localhost:5173/#/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `http://localhost:5173/#/employer`,
+      success_url: `https://virtualkonektions.com/#/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `https://virtualkonektions.com/#/employer`,
       metadata: {
         userId: req.user._id.toString(),
         planId: planId,
