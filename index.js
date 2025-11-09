@@ -12,9 +12,18 @@ const webhookRoutes = require("./routes/webhook");
 
 const app = express();
 const server = http.createServer(app);
+
+// CORS configuration for Socket.IO
+const allowedOrigins = [
+  "https://virtualkonektions.com",
+  "https://www.virtualkonektions.com",
+  "http://localhost:3000",
+  "http://localhost:5173",
+];
+
 const io = socketio(server, {
   cors: {
-    origin: "*", // TODO: restrict to frontend URL in production
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -30,8 +39,27 @@ app.use(express.json());
 app.use(passport.initialize());
 require("./middlewares/passport")(passport);
 
-// CORS
-app.use(cors({ origin: true, credentials: true }));
+// CORS Middleware
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  })
+);
+
+// Handle preflight requests
+app.options("*", cors());
 
 // -------------------- Routes --------------------
 app.use("/api/users", require("./routes/userRoutes"));
