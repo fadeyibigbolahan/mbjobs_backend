@@ -52,14 +52,15 @@ const userRegister = async (userDets, role, res) => {
       ...userDets,
       password: hashedPassword,
       role,
-      verificationCode,
-      verificationCodeExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
+      verified: true,
+      // verificationCode,
+      // verificationCodeExpires: Date.now() + 10 * 60 * 1000, // 10 minutes
       regionEligibility: regionData,
     });
 
     const savedUser = await newUser.save();
 
-    await sendVerificationEmail(savedUser.email, verificationCode);
+    // await sendVerificationEmail(savedUser.email, verificationCode);
 
     const token = jwt.sign(
       {
