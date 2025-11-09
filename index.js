@@ -13,7 +13,7 @@ const webhookRoutes = require("./routes/webhook");
 const app = express();
 const server = http.createServer(app);
 
-// CORS configuration for Socket.IO
+// CORS configuration
 const allowedOrigins = [
   "https://virtualkonektions.com",
   "https://www.virtualkonektions.com",
@@ -21,17 +21,20 @@ const allowedOrigins = [
   "http://localhost:5173",
 ];
 
-const io = socketio(server, {
-  cors: {
+// ✅ Apply CORS middleware FIRST, before any routes
+app.use(
+  cors({
     origin: allowedOrigins,
-    methods: ["GET", "POST"],
     credentials: true,
-  },
-});
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  })
+);
 
-// -------------------- Middlewares --------------------
+// ✅ Handle preflight requests explicitly
+app.options("*", cors());
 
-// ✅ Webhook route must come FIRST (before body parser)
+// ✅ Now add the webhook route (which might need special CORS handling)
 app.use("/webhook", webhookRoutes);
 
 // JSON body parser and passport
@@ -39,27 +42,14 @@ app.use(express.json());
 app.use(passport.initialize());
 require("./middlewares/passport")(passport);
 
-// CORS Middleware
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps, Postman, etc.)
-      if (!origin) return callback(null, true);
-
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
+// Socket.IO configuration with same CORS
+const io = socketio(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-  })
-);
-
-// Handle preflight requests
-app.options("*", cors());
+  },
+});
 
 // -------------------- Routes --------------------
 app.use("/api/users", require("./routes/userRoutes"));
