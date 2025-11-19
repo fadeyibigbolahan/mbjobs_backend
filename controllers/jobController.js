@@ -9,15 +9,25 @@ const PricingPlan = require("../models/PricingPlan"); // Assuming you have this 
 exports.createJob = async (req, res) => {
   console.log("create job", req.body);
   try {
-    // ✅ Restrict job posting to employers with active subscription
-    if (
-      req.user.role !== "employer" ||
-      !req.user.subscription ||
-      req.user.subscription.status !== "active"
-    ) {
+    // ✅ Restrict job posting to employers with active AND non-expired subscription
+    if (req.user.role !== "employer" || !req.user.subscription) {
       return res.status(403).json({
         success: false,
         message: "Only employers with an active subscription can post jobs",
+      });
+    }
+
+    // ✅ Check both status AND endDate to ensure subscription is truly active
+    const now = new Date();
+    const subscriptionEndDate = new Date(req.user.subscription.endDate);
+
+    if (
+      req.user.subscription.status !== "active" ||
+      subscriptionEndDate < now
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Your subscription has expired. Please renew to post jobs.",
       });
     }
 

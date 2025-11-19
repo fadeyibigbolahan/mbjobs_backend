@@ -33,7 +33,6 @@ const UserSchema = new Schema(
     },
     zipCode: {
       type: String,
-      required: true,
       trim: true,
     },
     password: {

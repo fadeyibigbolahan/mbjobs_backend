@@ -45,7 +45,6 @@ exports.updateEmployerProfile = async (req, res) => {
 };
 
 // PATCH /user/me
-// controllers/userController.js
 exports.updateMyProfile = async (req, res) => {
   try {
     const { fullName, email, phone, companyName, bio, password } = req.body;
