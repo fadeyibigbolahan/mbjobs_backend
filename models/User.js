@@ -71,8 +71,16 @@ const UserSchema = new Schema(
       endDate: Date,
       status: {
         type: String,
-        enum: ["active", "expired", "pending"],
+        enum: ["active", "expired", "pending", "canceled"],
         default: "pending",
+      },
+      // Add these optional fields for better tracking
+      planTitle: String,
+      periodLabel: String,
+      totalPaid: Number,
+      autoRenew: {
+        type: Boolean,
+        default: true, // Default to true for new subscriptions
       },
     },
 
@@ -178,5 +186,38 @@ const UserSchema = new Schema(
   },
   { timestamps: true }
 );
+
+// Add a method to check if subscription is expired
+UserSchema.methods.isSubscriptionExpired = function () {
+  if (
+    !this.subscription ||
+    !this.subscription.endDate ||
+    this.subscription.status !== "active"
+  ) {
+    return true;
+  }
+
+  const now = new Date();
+  const endDate = new Date(this.subscription.endDate);
+  return endDate < now;
+};
+
+// Pre-save middleware to automatically update subscription status
+UserSchema.pre("save", function (next) {
+  if (
+    this.subscription &&
+    this.subscription.endDate &&
+    this.subscription.status === "active"
+  ) {
+    const now = new Date();
+    const endDate = new Date(this.subscription.endDate);
+
+    if (endDate < now) {
+      this.subscription.status = "expired";
+      this.subscription.autoRenew = false;
+    }
+  }
+  next();
+});
 
 module.exports = model("User", UserSchema);
