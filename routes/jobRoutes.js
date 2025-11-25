@@ -9,6 +9,11 @@ const {
   getMyJobs,
   getAllJobs,
   getJobApplicants,
+
+  getAllJobsAdmin,
+  getJobStatsAdmin,
+  deleteJobAdmin,
+  updateJobStatusAdmin,
 } = require("../controllers/jobController");
 
 const { checkRole, userAuth } = require("../utils/Auth");
@@ -41,6 +46,21 @@ router.get(
   userAuth,
   checkRole(["employer"]),
   getJobApplicants
+);
+
+router.get("/admin/jobs", userAuth, checkRole(["admin"]), getAllJobsAdmin);
+router.get(
+  "/admin/jobs/stats",
+  userAuth,
+  checkRole(["admin"]),
+  getJobStatsAdmin
+);
+router.delete("/admin/:id", userAuth, checkRole(["admin"]), deleteJobAdmin);
+router.put(
+  "/admin/:id/status",
+  userAuth,
+  checkRole(["admin"]),
+  updateJobStatusAdmin
 );
 
 module.exports = router;

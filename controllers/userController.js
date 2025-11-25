@@ -19,6 +19,7 @@ exports.getMyProfile = async (req, res) => {
 // controllers/employerController.js
 exports.updateEmployerProfile = async (req, res) => {
   try {
+    console.log("Update employer profile called");
     const { companyName, bio, phone, email } = req.body;
     const updateData = { companyName, bio, phone, email };
 
@@ -47,12 +48,19 @@ exports.updateEmployerProfile = async (req, res) => {
 // PATCH /user/me
 exports.updateMyProfile = async (req, res) => {
   try {
-    const { fullName, email, phone, companyName, bio, password } = req.body;
+    const {
+      fullName,
+      email,
+      phone,
+      companyName,
+      bio,
+      password,
+      city,
+      country,
+    } = req.body;
 
     console.log("Update profile called");
     console.log("Request body:", req.body);
-    console.log("Request files:", req.files);
-    console.log("User ID:", req.user._id);
 
     const user = await User.findById(req.user._id);
     if (!user) {
@@ -88,10 +96,11 @@ exports.updateMyProfile = async (req, res) => {
 
     // ✅ General updates
     if (fullName) user.fullName = fullName;
+    if (city) user.city = city;
+    if (country) user.country = country;
 
     // ✅ Password update
     if (password && password.trim() !== "") {
-      // Assuming you have password hashing (bcrypt)
       const bcrypt = require("bcrypt");
       const saltRounds = 10;
       user.password = await bcrypt.hash(password, saltRounds);
@@ -104,10 +113,8 @@ exports.updateMyProfile = async (req, res) => {
 
         let categories;
         if (typeof req.body.apprenticeCategories === "string") {
-          // If it's a JSON string, parse it
           categories = JSON.parse(req.body.apprenticeCategories);
         } else if (Array.isArray(req.body.apprenticeCategories)) {
-          // If it's already an array, use it directly
           categories = req.body.apprenticeCategories;
         } else {
           categories = [];
@@ -145,6 +152,8 @@ exports.updateMyProfile = async (req, res) => {
       fullName: user.fullName,
       email: user.email,
       phone: user.phone,
+      city: user.city,
+      country: user.country,
       role: user.role,
       apprenticeCategories: user.apprenticeCategories,
       companyName: user.companyName,
@@ -158,7 +167,6 @@ exports.updateMyProfile = async (req, res) => {
       await user.populate("apprenticeCategories", "name");
     }
 
-    // Return response with success field that frontend expects
     res.json({
       success: true,
       message: "Profile updated successfully",
@@ -167,6 +175,8 @@ exports.updateMyProfile = async (req, res) => {
         fullName: user.fullName,
         email: user.email,
         phone: user.phone,
+        city: user.city,
+        country: user.country,
         role: user.role,
         companyName: user.companyName,
         bio: user.bio,
@@ -184,87 +194,247 @@ exports.updateMyProfile = async (req, res) => {
   }
 };
 
-exports.getUserCards = async (req, res) => {
+// GET /users - Get all users with optional filtering, pagination, and sorting
+exports.getAllUsers = async (req, res) => {
   try {
-    const userId = req.user._id; // Use req.user.id for the authenticated user
+    // Extract query parameters
+    const {
+      page = 1,
+      limit = 10,
+      sortBy = "createdAt",
+      sortOrder = "desc",
+      role,
+      approvalStatus,
+      subscriptionStatus,
+      search,
+      regionEligibility,
+    } = req.query;
 
-    const user = await User.findById(userId).populate(
-      "organizations.organizationId"
-    );
+    // Build filter object
+    const filter = {};
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
+    // Filter by role
+    if (role && ["apprentice", "employer", "admin"].includes(role)) {
+      filter.role = role;
     }
 
-    // Get all the cards (memberships) the user has in different organizations
-    const cards = user.organizations.map((orgMembership) => ({
-      membershipId: orgMembership.membershipId,
-      organizationName: orgMembership.organizationId.name, // Assuming organization has a name
-      membershipLevel: orgMembership.membershipLevel,
-      qrCodeUrl: orgMembership.qrCodeUrl, // QR code URL
+    // Filter by approval status
+    if (
+      approvalStatus &&
+      ["pending", "approved", "rejected"].includes(approvalStatus)
+    ) {
+      filter.approvalStatus = approvalStatus;
+    }
+
+    // Filter by subscription status
+    if (subscriptionStatus) {
+      if (subscriptionStatus === "active") {
+        filter["subscription.status"] = "active";
+        filter["subscription.endDate"] = { $gte: new Date() };
+      } else if (subscriptionStatus === "expired") {
+        filter["subscription.status"] = "expired";
+      } else {
+        filter["subscription.status"] = subscriptionStatus;
+      }
+    }
+
+    // Filter by region eligibility
+    if (regionEligibility !== undefined) {
+      filter["regionEligibility.isEligible"] = regionEligibility === "true";
+    }
+
+    // Search filter (across multiple fields)
+    if (search) {
+      filter.$or = [
+        { fullName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { companyName: { $regex: search, $options: "i" } },
+        { city: { $regex: search, $options: "i" } },
+        { country: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Calculate pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === "asc" ? 1 : -1;
+
+    // Execute query with population
+    const users = await User.find(filter)
+      .select("-password -verificationCode") // Exclude sensitive fields
+      .populate("apprenticeCategories", "name")
+      .populate("subscription.planId", "title price") // Populate plan details
+      .populate("approvedBy", "fullName email") // Populate admin who approved
+      .sort(sort)
+      .skip(skip)
+      .limit(limitNum)
+      .lean(); // Use lean for better performance
+
+    // Get total count for pagination
+    const totalUsers = await User.countDocuments(filter);
+    const totalPages = Math.ceil(totalUsers / limitNum);
+
+    // Format response data
+    const formattedUsers = users.map((user) => ({
+      _id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone,
+      country: user.country,
+      city: user.city,
+      zipCode: user.zipCode,
+      profileImage: user.profileImage,
+      role: user.role,
+      companyName: user.companyName,
+      companyLogo: user.companyLogo,
+      bio: user.bio,
+      regionEligibility: user.regionEligibility,
+      subscription: user.subscription,
+      approvalStatus: user.approvalStatus,
+      approvalDate: user.approvalDate,
+      approvedBy: user.approvedBy,
+      rejectionReason: user.rejectionReason,
+      verified: user.verified,
+      apprenticeCategories: user.apprenticeCategories,
+      wioaQuestionnaire: user.wioaQuestionnaire,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+      // Add computed fields
+      isSubscriptionActive:
+        user.subscription?.status === "active" &&
+        new Date(user.subscription.endDate) > new Date(),
+      isProfileComplete: this.checkProfileCompleteness(user),
     }));
 
-    res.json({ cards });
+    res.json({
+      success: true,
+      data: formattedUsers,
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalUsers,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+      },
+      filters: {
+        role,
+        approvalStatus,
+        subscriptionStatus,
+        search,
+        regionEligibility,
+      },
+    });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("Get all users error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching users",
+      error: err.message,
+    });
   }
 };
 
-exports.getMyOrgEvents = async (req, res) => {
-  try {
-    console.log("get my org events called");
+// Helper function to check profile completeness
+exports.checkProfileCompleteness = (user) => {
+  const requiredFields = {
+    apprentice: ["fullName", "email", "phone", "country", "city"],
+    employer: ["fullName", "email", "phone", "country", "city", "companyName"],
+    admin: ["fullName", "email", "phone"],
+  };
 
-    const userId = req.user._id;
+  const fieldsToCheck = requiredFields[user.role] || requiredFields.apprentice;
 
-    // Find all approved memberships for this user
-    const memberships = await OrganizationMembership.find({
-      userId,
-      status: "approved",
-    })
-      .select("organizationId")
-      .populate("organizationId", "name logoUrl");
-
-    // Extract the raw ObjectIds
-    const orgIds = memberships
-      .map((m) => m.organizationId?._id)
-      .filter(Boolean);
-
-    if (orgIds.length === 0) {
-      return res
-        .status(200)
-        .json({ message: "No organization memberships found", events: [] });
-    }
-
-    // Fetch events from those orgs
-    const events = await Event.find({ organizationId: { $in: orgIds } })
-      .populate("organizationId", "name logoUrl")
-      .sort({ date: 1 });
-
-    return res.status(200).json({
-      message: "Events from your organizations retrieved successfully",
-      events,
-    });
-  } catch (err) {
-    console.error("getMyOrgEvents error:", err);
-    return res.status(500).json({ message: "Server error" });
-  }
+  return fieldsToCheck.every((field) => {
+    const value = user[field];
+    return value !== undefined && value !== null && value !== "";
+  });
 };
 
-exports.getMyBookedEvents = async (req, res) => {
+// GET /users/stats - Get user statistics
+exports.getUserStats = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const stats = await User.aggregate([
+      {
+        $facet: {
+          roleStats: [
+            {
+              $group: {
+                _id: "$role",
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          approvalStats: [
+            {
+              $group: {
+                _id: "$approvalStatus",
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          subscriptionStats: [
+            {
+              $group: {
+                _id: "$subscription.status",
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          regionStats: [
+            {
+              $group: {
+                _id: "$regionEligibility.isEligible",
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          verificationStats: [
+            {
+              $group: {
+                _id: "$verified",
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          wioaStats: [
+            {
+              $group: {
+                _id: "$wioaQuestionnaire.completed",
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          monthlyRegistrations: [
+            {
+              $group: {
+                _id: {
+                  year: { $year: "$createdAt" },
+                  month: { $month: "$createdAt" },
+                },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { "_id.year": -1, "_id.month": -1 } },
+            { $limit: 12 },
+          ],
+        },
+      },
+    ]);
 
-    const bookings = await Booking.find({ userId })
-      .populate("eventId")
-      .populate("organizationId", "name logoUrl") // optional
-      .sort({ bookedAt: -1 });
-
-    return res.status(200).json({
-      message: "Your booked events retrieved successfully",
-      bookings,
+    res.json({
+      success: true,
+      data: stats[0],
     });
   } catch (err) {
-    console.error("getMyBookedEvents error:", err);
-    return res.status(500).json({ message: "Server error" });
+    console.error("Get user stats error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching user statistics",
+      error: err.message,
+    });
   }
 };

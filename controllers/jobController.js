@@ -344,3 +344,188 @@ exports.getJobApplicants = async (req, res) => {
     });
   }
 };
+
+// Add to your jobController.js
+
+// Get all jobs for admin
+exports.getAllJobsAdmin = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search, status, jobType } = req.query;
+
+    console.log("Admin fetching jobs with filters:", {
+      search,
+      status,
+      jobType,
+    });
+
+    // Build filter object
+    const filter = {};
+    if (status && status !== "all") filter.status = status;
+    if (jobType && jobType !== "all") filter.jobType = jobType;
+
+    // Search filter
+    if (search) {
+      filter.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+        { location: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const jobs = await Job.find(filter)
+      .populate("employer", "fullName email companyName companyLogo")
+      .populate("category", "name")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const totalJobs = await Job.countDocuments(filter);
+    const totalPages = Math.ceil(totalJobs / limitNum);
+
+    console.log(`Found ${jobs.length} jobs out of ${totalJobs} total`);
+
+    res.json({
+      success: true,
+      data: jobs,
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalJobs,
+        hasNext: pageNum < totalPages,
+        hasPrev: pageNum > 1,
+      },
+    });
+  } catch (err) {
+    console.error("Error in getAllJobsAdmin:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching jobs",
+      error: err.message,
+    });
+  }
+};
+
+// Get job stats for admin
+exports.getJobStatsAdmin = async (req, res) => {
+  try {
+    console.log("Fetching job stats for admin");
+
+    const stats = await Job.aggregate([
+      {
+        $facet: {
+          statusStats: [
+            {
+              $group: {
+                _id: "$status",
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          typeStats: [
+            {
+              $group: {
+                _id: "$jobType",
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          monthlyJobs: [
+            {
+              $group: {
+                _id: {
+                  year: { $year: "$createdAt" },
+                  month: { $month: "$createdAt" },
+                },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { "_id.year": -1, "_id.month": -1 } },
+            { $limit: 12 },
+          ],
+        },
+      },
+    ]);
+
+    res.json({
+      success: true,
+      data: stats[0],
+    });
+  } catch (err) {
+    console.error("Error in getJobStatsAdmin:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching job statistics",
+      error: err.message,
+    });
+  }
+};
+
+// Delete job as admin
+exports.deleteJobAdmin = async (req, res) => {
+  try {
+    console.log("Admin deleting job:", req.params.id);
+
+    const job = await Job.findById(req.params.id);
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Job not found",
+      });
+    }
+
+    await Job.findByIdAndDelete(req.params.id);
+
+    // Also delete related applications
+    await Application.deleteMany({ job: req.params.id });
+
+    res.json({
+      success: true,
+      message: "Job deleted successfully",
+    });
+  } catch (err) {
+    console.error("Error in deleteJobAdmin:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error deleting job",
+      error: err.message,
+    });
+  }
+};
+
+// Update job status as admin
+exports.updateJobStatusAdmin = async (req, res) => {
+  try {
+    const { status } = req.body;
+    console.log("Admin updating job status:", req.params.id, "to", status);
+
+    const job = await Job.findById(req.params.id);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Job not found",
+      });
+    }
+
+    job.status = status;
+    await job.save();
+
+    res.json({
+      success: true,
+      message: "Job status updated successfully",
+      job,
+    });
+  } catch (err) {
+    console.error("Error in updateJobStatusAdmin:", err);
+    res.status(500).json({
+      success: false,
+      message: "Error updating job status",
+      error: err.message,
+    });
+  }
+};

@@ -10,6 +10,8 @@ const {
   getMyProfile,
   updateMyProfile,
   updateEmployerProfile,
+  getAllUsers,
+  getUserStats, // Add the new functions
 } = require("../controllers/userController");
 const {
   serializeUser,
@@ -86,6 +88,16 @@ const upload = multer({
   },
 });
 
+// ==================== ADMIN ROUTES ====================
+
+// GET /admin/users - Get all users with filtering, pagination, and sorting
+router.get("/admin/users", userAuth, checkRole(["admin"]), getAllUsers);
+
+// GET /admin/users/stats - Get user statistics
+router.get("/admin/users/stats", userAuth, checkRole(["admin"]), getUserStats);
+
+// ==================== AUTH ROUTES ====================
+
 // Users Registration Route
 router.post("/register-apprentice", async (req, res) => {
   await userRegister(req.body, "apprentice", res);
@@ -105,10 +117,12 @@ router.post("/login-user", async (req, res) => {
   await userLogin(req.body, res);
 });
 
+// ==================== USER PROFILE ROUTES ====================
+
 // Get user profile
 router.get("/me", userAuth, getMyProfile);
 
-// Update user profile - THIS IS THE IMPORTANT FIX
+// Update user profile
 router.patch(
   "/me",
   userAuth,
@@ -128,7 +142,9 @@ router.put(
   updateEmployerProfile
 );
 
-// In your server routes (e.g., routes/apprentice.js)
+// ==================== APPRENTICE DASHBOARD ROUTES ====================
+
+// Get apprentice dashboard stats
 router.get("/dashboard-stats", userAuth, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -176,7 +192,7 @@ router.get("/dashboard-stats", userAuth, async (req, res) => {
   }
 });
 
-// In your server routes
+// Get job matches for apprentice
 router.get("/job-matches", userAuth, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -210,7 +226,7 @@ router.get("/job-matches", userAuth, async (req, res) => {
         location: job.location,
         match: matchPercentage,
         skills: job.requirements.slice(0, 3), // Show first 3 requirements as skills
-        posted: formatDate(job.createdAt), // You'll need to implement formatDate
+        posted: formatDate(job.createdAt),
       };
     });
 
@@ -220,7 +236,7 @@ router.get("/job-matches", userAuth, async (req, res) => {
   }
 });
 
-// In your server routes
+// Get recent applications for apprentice
 router.get("/recent-applications", userAuth, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -281,6 +297,8 @@ router.get("/recent-applications", userAuth, async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });
+
+// ==================== UTILITY ROUTES ====================
 
 // Debug route to test multer (you can remove this later)
 router.post(
