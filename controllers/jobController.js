@@ -376,6 +376,7 @@ exports.getAllJobsAdmin = async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
+    // First, get the jobs with basic population
     const jobs = await Job.find(filter)
       .populate("employer", "fullName email companyName companyLogo")
       .populate("category", "name")
@@ -383,6 +384,32 @@ exports.getAllJobsAdmin = async (req, res) => {
       .skip(skip)
       .limit(limitNum)
       .lean();
+
+    // Now populate the user field in each hire
+    for (let job of jobs) {
+      if (job.hires && job.hires.length > 0) {
+        // Get user IDs from hires
+        const userIds = job.hires.map((hire) => hire.user);
+
+        // Fetch users
+        const users = await User.find(
+          { _id: { $in: userIds } },
+          "fullName email phone profilePicture"
+        ).lean();
+
+        // Create a map of user data for quick lookup
+        const userMap = {};
+        users.forEach((user) => {
+          userMap[user._id.toString()] = user;
+        });
+
+        // Attach user data to each hire
+        job.hires = job.hires.map((hire) => ({
+          ...hire,
+          userData: userMap[hire.user.toString()] || null,
+        }));
+      }
+    }
 
     const totalJobs = await Job.countDocuments(filter);
     const totalPages = Math.ceil(totalJobs / limitNum);
@@ -532,6 +559,12 @@ exports.updateJobStatusAdmin = async (req, res) => {
 
 // Add to jobController.js - Offer job to applicant
 exports.createHire = async (req, res) => {
+  console.log(
+    "Creating hire for job:",
+    req.params.jobId,
+    "to user:",
+    req.params.userId
+  );
   try {
     const { jobId, userId } = req.params;
     const { salary, employmentType, startDate, notes } = req.body;
@@ -559,6 +592,8 @@ exports.createHire = async (req, res) => {
       apprentice: userId,
       status: "accepted", // Only shortlisted candidates can be hired
     });
+
+    console.log("Found application for hire:", application);
 
     if (!application) {
       return res.status(400).json({

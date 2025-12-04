@@ -58,7 +58,14 @@ const JobSchema = new Schema(
         user: { type: Schema.Types.ObjectId, ref: "User" },
         status: {
           type: String,
-          enum: ["offered", "accepted", "onboarding", "active", "terminated"],
+          enum: [
+            "offered",
+            "accepted",
+            "onboarding",
+            "active",
+            "terminated",
+            "completed",
+          ],
         },
         hireDate: Date,
         startDate: Date,

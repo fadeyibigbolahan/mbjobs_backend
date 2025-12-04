@@ -24,7 +24,6 @@ const ApplicationSchema = new Schema(
         "interviewScheduled",
         "accepted",
         "rejected",
-        "hired",
       ],
       default: "pending",
     },
