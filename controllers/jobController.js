@@ -529,3 +529,669 @@ exports.updateJobStatusAdmin = async (req, res) => {
     });
   }
 };
+
+// Add to jobController.js - Offer job to applicant
+exports.createHire = async (req, res) => {
+  try {
+    const { jobId, userId } = req.params;
+    const { salary, employmentType, startDate, notes } = req.body;
+
+    const job = await Job.findById(jobId);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Job not found",
+      });
+    }
+
+    // Check if user owns the job
+    if (job.employer.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    // Check if applicant has applied
+    const application = await Application.findOne({
+      job: jobId,
+      apprentice: userId,
+      status: "accepted", // Only shortlisted candidates can be hired
+    });
+
+    if (!application) {
+      return res.status(400).json({
+        success: false,
+        message: "Candidate must be accepted first",
+      });
+    }
+
+    // Check if already hired
+    const alreadyHired = job.hires.find(
+      (hire) => hire.user.toString() === userId
+    );
+
+    if (alreadyHired) {
+      return res.status(400).json({
+        success: false,
+        message: "Candidate already hired for this position",
+      });
+    }
+
+    // Create hire entry
+    job.hires.push({
+      user: userId,
+      status: "offered",
+      hireDate: new Date(),
+      startDate: startDate ? new Date(startDate) : null,
+      salary: salary || job.salaryMax,
+      employmentType: employmentType || job.jobType,
+      notes: notes || "",
+    });
+
+    await job.save();
+
+    // Update application status
+    application.status = "hired";
+    await application.save();
+
+    // Populate user info for response
+    const updatedJob = await Job.findById(jobId).populate(
+      "hires.user",
+      "fullName email phone"
+    );
+
+    res.status(201).json({
+      success: true,
+      message: "Job offer sent successfully",
+      hire: updatedJob.hires[updatedJob.hires.length - 1],
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to create hire",
+      error: err.message,
+    });
+  }
+};
+
+// Update hire status (accept/reject offer, start employment, etc.)
+exports.updateHireStatus = async (req, res) => {
+  try {
+    const { jobId, hireId } = req.params;
+    const { status, startDate, endDate } = req.body;
+
+    const job = await Job.findById(jobId);
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Job not found",
+      });
+    }
+
+    // Find the hire
+    const hireIndex = job.hires.findIndex(
+      (hire) => hire._id.toString() === hireId
+    );
+
+    if (hireIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Hire not found",
+      });
+    }
+
+    const hire = job.hires[hireIndex];
+
+    // Authorization logic
+    const isEmployer = job.employer.toString() === req.user._id.toString();
+    const isEmployee = hire.user.toString() === req.user._id.toString();
+
+    // Determine who can update what status
+    if (status === "accepted" || status === "rejected") {
+      // Only employee can accept/reject offers
+      if (!isEmployee) {
+        return res.status(403).json({
+          success: false,
+          message: "Only the candidate can accept/reject offers",
+        });
+      }
+    } else if (
+      ["onboarding", "active", "terminated", "completed"].includes(status)
+    ) {
+      // Only employer can update these statuses
+      if (!isEmployer) {
+        return res.status(403).json({
+          success: false,
+          message: "Only employer can update this status",
+        });
+      }
+    }
+
+    // Update hire
+    job.hires[hireIndex].status = status;
+
+    if (startDate) job.hires[hireIndex].startDate = new Date(startDate);
+    if (endDate) job.hires[hireIndex].endDate = new Date(endDate);
+
+    // If employee accepts, set start date if not already set
+    if (status === "accepted" && !job.hires[hireIndex].startDate) {
+      job.hires[hireIndex].startDate = new Date();
+    }
+
+    await job.save();
+
+    res.json({
+      success: true,
+      message: `Hire status updated to ${status}`,
+      hire: job.hires[hireIndex],
+    });
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to update hire status",
+      error: err.message,
+    });
+  }
+};
+
+// Get all hires/offers for current apprentice
+exports.getMyHires = async (req, res) => {
+  try {
+    const apprenticeId = req.user._id;
+
+    // Find all jobs where the apprentice is in the hires array
+    const jobsWithHires = await Job.find({
+      "hires.user": apprenticeId,
+    })
+      .populate("employer", "fullName email companyName companyLogo")
+      .populate("category", "name")
+      .select("title category location jobType deadline hires")
+      .lean();
+
+    // Extract only the hire records for this apprentice
+    const myHires = jobsWithHires.flatMap((job) => {
+      return job.hires
+        .filter((hire) => hire.user.toString() === apprenticeId.toString())
+        .map((hire) => ({
+          hireId: hire._id,
+          status: hire.status,
+          offerDate: hire.hireDate,
+          startDate: hire.startDate,
+          salary: hire.salary,
+          employmentType: hire.employmentType,
+          job: {
+            id: job._id,
+            title: job.title,
+            category: job.category,
+            location: job.location,
+            jobType: job.jobType,
+            deadline: job.deadline,
+            employer: job.employer,
+          },
+        }));
+    });
+
+    // Sort by offer date (newest first)
+    myHires.sort((a, b) => new Date(b.offerDate) - new Date(a.offerDate));
+
+    res.status(200).json({
+      success: true,
+      hires: myHires,
+      total: myHires.length,
+      stats: {
+        offered: myHires.filter((h) => h.status === "offered").length,
+        accepted: myHires.filter((h) => h.status === "accepted").length,
+        active: myHires.filter((h) => h.status === "active").length,
+        completed: myHires.filter((h) => h.status === "completed").length,
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching my hires:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch job offers",
+      error: err.message,
+    });
+  }
+};
+
+// controllers/jobController.js
+
+// Get all hires for a specific job (Employer only)
+exports.getJobHires = async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const employerId = req.user._id;
+
+    // Find the job and populate hire details
+    const job = await Job.findById(jobId)
+      .populate({
+        path: "hires.user",
+        select:
+          "fullName email phone profileImage city country bio apprenticeCategories",
+        populate: {
+          path: "apprenticeCategories",
+          select: "name",
+        },
+      })
+      .populate("category", "name")
+      .populate("employer", "fullName email companyName companyLogo");
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Job not found",
+      });
+    }
+
+    // Verify that the current user owns this job
+    if (job.employer._id.toString() !== employerId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized access to job hires",
+      });
+    }
+
+    // Format hires data
+    const hires = job.hires.map((hire) => ({
+      hireId: hire._id,
+      status: hire.status,
+      offerDate: hire.offerDate,
+      startDate: hire.startDate,
+      endDate: hire.endDate,
+      salary: hire.salary,
+      employmentType: hire.employmentType,
+      user: {
+        id: hire.user._id,
+        fullName: hire.user.fullName,
+        email: hire.user.email,
+        phone: hire.user.phone,
+        city: hire.user.city,
+        country: hire.user.country,
+        profileImage: hire.user.profileImage,
+        bio: hire.user.bio,
+        categories:
+          hire.user.apprenticeCategories?.map((cat) => cat.name) || [],
+      },
+      // Additional calculated fields
+      duration: hire.startDate
+        ? Math.floor(
+            (new Date() - new Date(hire.startDate)) / (1000 * 60 * 60 * 24)
+          ) + " days"
+        : null,
+      isActive: hire.status === "active",
+      isCompleted: hire.status === "completed",
+      isTerminated: hire.status === "terminated",
+    }));
+
+    // Sort hires by status and date
+    const statusOrder = {
+      active: 1,
+      onboarding: 2,
+      offered: 3,
+      accepted: 4,
+      completed: 5,
+      terminated: 6,
+      rejected: 7,
+    };
+
+    hires.sort((a, b) => {
+      // First by status priority
+      if (statusOrder[a.status] !== statusOrder[b.status]) {
+        return statusOrder[a.status] - statusOrder[b.status];
+      }
+      // Then by offer date (newest first)
+      return new Date(b.offerDate) - new Date(a.offerDate);
+    });
+
+    // Calculate statistics
+    const stats = {
+      total: hires.length,
+      active: hires.filter((h) => h.status === "active").length,
+      onboarding: hires.filter((h) => h.status === "onboarding").length,
+      offered: hires.filter((h) => h.status === "offered").length,
+      accepted: hires.filter((h) => h.status === "accepted").length,
+      completed: hires.filter((h) => h.status === "completed").length,
+      terminated: hires.filter((h) => h.status === "terminated").length,
+      rejected: hires.filter((h) => h.status === "rejected").length,
+    };
+
+    res.status(200).json({
+      success: true,
+      job: {
+        id: job._id,
+        title: job.title,
+        category: job.category?.name,
+        location: job.location,
+        jobType: job.jobType,
+        status: job.status,
+        deadline: job.deadline,
+        employer: job.employer,
+      },
+      hires: hires,
+      statistics: stats,
+      pagination: {
+        total: hires.length,
+        page: 1,
+        totalPages: 1,
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching job hires:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch job hires",
+      error: err.message,
+    });
+  }
+};
+
+exports.getAllEmployerHires = async (req, res) => {
+  try {
+    const employerId = req.user._id;
+
+    const jobs = await Job.find({ employer: employerId })
+      .populate({
+        path: "hires.user",
+        select: "fullName email phone profileImage",
+      })
+      .select("title hires");
+
+    // Flatten hires from all jobs
+    const allHires = jobs.flatMap((job) =>
+      job.hires.map((hire) => ({
+        ...hire.toObject(),
+        jobTitle: job.title,
+        jobId: job._id,
+      }))
+    );
+
+    res.json({ success: true, hires: allHires });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Update application status
+exports.updateApplicationStatus = async (req, res) => {
+  console.log("Updating application status:", req.params.id, req.body);
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const application = await Application.findById(id).populate(
+      "job",
+      "employer"
+    );
+
+    if (!application) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Application not found" });
+    }
+
+    // Check if user is the job owner
+    if (application.job.employer.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    application.status = status;
+    await application.save();
+
+    res.json({ success: true, application });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get specific hire by ID
+exports.getHireById = async (req, res) => {
+  try {
+    const { hireId } = req.params;
+
+    const job = await Job.findOne({ "hires._id": hireId })
+      .populate({
+        path: "hires.user",
+        select: "fullName email phone profileImage",
+      })
+      .populate("employer", "fullName email companyName");
+
+    if (!job) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Hire not found" });
+    }
+
+    const hire = job.hires.id(hireId);
+    res.json({ success: true, hire, job: { title: job.title, id: job._id } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Apprentice responds to hire offer
+exports.respondToHireOffer = async (req, res) => {
+  try {
+    const { hireId } = req.params;
+    const { accept } = req.body; // boolean: true for accept, false for reject
+
+    const job = await Job.findOne({ "hires._id": hireId });
+
+    if (!job) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Hire not found" });
+    }
+
+    const hire = job.hires.id(hireId);
+
+    // Check if apprentice owns this hire
+    if (hire.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: "Unauthorized" });
+    }
+
+    if (hire.status !== "offered") {
+      return res.status(400).json({
+        success: false,
+        message: "This offer has already been responded to",
+      });
+    }
+
+    hire.status = accept ? "accepted" : "rejected";
+    if (accept) {
+      hire.startDate = hire.startDate || new Date();
+    }
+
+    await job.save();
+
+    res.json({
+      success: true,
+      message: `Offer ${accept ? "accepted" : "rejected"} successfully`,
+      hire,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// Get single hire details for apprentice (with job details)
+exports.getApprenticeHireById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const apprenticeId = req.user._id;
+
+    // Find job where apprentice has this hire
+    const job = await Job.findOne({
+      "hires._id": id,
+      "hires.user": apprenticeId,
+    })
+      .populate("employer", "fullName email companyName companyLogo phone")
+      .populate("category", "name")
+      .lean();
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Hire not found or unauthorized",
+      });
+    }
+
+    // Find the specific hire
+    const hire = job.hires.find(
+      (h) =>
+        h._id.toString() === id && h.user.toString() === apprenticeId.toString()
+    );
+
+    if (!hire) {
+      return res.status(404).json({
+        success: false,
+        message: "Hire not found",
+      });
+    }
+
+    // Format the response
+    const response = {
+      hireId: hire._id,
+      status: hire.status,
+      offerDate: hire.offerDate,
+      startDate: hire.startDate,
+      endDate: hire.endDate,
+      salary: hire.salary,
+      employmentType: hire.employmentType,
+      notes: hire.notes || "",
+      job: {
+        id: job._id,
+        title: job.title,
+        description: job.description,
+        location: job.location,
+        jobType: job.jobType,
+        requirements: job.requirements || [],
+        deadline: job.deadline,
+        category: job.category,
+        employer: job.employer,
+      },
+    };
+
+    res.status(200).json({
+      success: true,
+      hire: response,
+    });
+  } catch (err) {
+    console.error("Error fetching apprentice hire details:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch hire details",
+      error: err.message,
+    });
+  }
+};
+
+exports.getHireTimeline = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const apprenticeId = req.user._id;
+
+    // Verify the hire belongs to the apprentice
+    const job = await Job.findOne({
+      "hires._id": id,
+      "hires.user": apprenticeId,
+    });
+
+    if (!job) {
+      return res.status(404).json({
+        success: false,
+        message: "Hire not found or unauthorized",
+      });
+    }
+
+    const hire = job.hires.find((h) => h._id.toString() === id);
+
+    // Generate timeline based on hire status and dates
+    const timeline = [];
+
+    // Job Applied Date (from application)
+    const application = await Application.findOne({
+      job: job._id,
+      apprentice: apprenticeId,
+    });
+
+    if (application) {
+      timeline.push({
+        id: 1,
+        event: "Applied for Job",
+        date: application.createdAt,
+        status: "completed",
+        icon: "📝",
+        description: `Applied for ${job.title}`,
+      });
+    }
+
+    // Offer Sent
+    if (hire.offerDate) {
+      timeline.push({
+        id: 2,
+        event: "Job Offer Sent",
+        date: hire.offerDate,
+        status: "completed",
+        icon: "📧",
+        description: "Received job offer from employer",
+      });
+    }
+
+    // Offer Accepted/Rejected
+    if (hire.status === "accepted" || hire.status === "rejected") {
+      timeline.push({
+        id: 3,
+        event: `Offer ${hire.status === "accepted" ? "Accepted" : "Declined"}`,
+        date: hire.startDate || new Date(),
+        status: "completed",
+        icon: hire.status === "accepted" ? "✅" : "❌",
+        description: `You ${
+          hire.status === "accepted" ? "accepted" : "declined"
+        } the job offer`,
+      });
+    }
+
+    // Onboarding
+    if (hire.status === "onboarding") {
+      timeline.push({
+        id: 4,
+        event: "Onboarding Started",
+        date: new Date(),
+        status: "in-progress",
+        icon: "🚀",
+        description: "Started onboarding process",
+      });
+    }
+
+    // Active Employment
+    if (hire.status === "active" && hire.startDate) {
+      timeline.push({
+        id: 5,
+        event: "Employment Started",
+        date: hire.startDate,
+        status: "completed",
+        icon: "💼",
+        description: "Started working in the position",
+      });
+    }
+
+    // Sort by date
+    timeline.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    res.status(200).json({
+      success: true,
+      timeline,
+    });
+  } catch (err) {
+    console.error("Error fetching hire timeline:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch timeline",
+      error: err.message,
+    });
+  }
+};

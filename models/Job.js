@@ -53,6 +53,20 @@ const JobSchema = new Schema(
       enum: ["open", "closed", "expired"],
       default: "open",
     },
+    hires: [
+      {
+        user: { type: Schema.Types.ObjectId, ref: "User" },
+        status: {
+          type: String,
+          enum: ["offered", "accepted", "onboarding", "active", "terminated"],
+        },
+        hireDate: Date,
+        startDate: Date,
+        salary: Number,
+        employmentType: String, // Could differ from jobType
+        notes: String,
+      },
+    ],
   },
   { timestamps: true }
 );

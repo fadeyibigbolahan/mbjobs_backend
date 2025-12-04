@@ -15,8 +15,6 @@ const PricingPlanSchema = new Schema({
 
   icon: String, // store icon name so frontend can map to correct component
 
-  icon: String,
-
   color: String,
   bgColor: String,
   borderColor: String,
