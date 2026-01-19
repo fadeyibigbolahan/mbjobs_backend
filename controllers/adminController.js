@@ -283,7 +283,7 @@ exports.getApprenticeStatus = async (req, res) => {
     const user = await User.findById(id)
       .populate("wioaQuestionnaire.data")
       .select(
-        "approvalStatus approvalDate approvedBy rejectionReason wioaQuestionnaire fullName email role"
+        "approvalStatus approvalDate approvedBy rejectionReason wioaQuestionnaire fullName email role",
       );
 
     if (!user) {

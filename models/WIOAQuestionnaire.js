@@ -61,7 +61,7 @@ const WIOAQuestionnaireSchema = new Schema(
     hasDisability: {
       type: String,
       enum: ["Yes", "No", "I Do Not Self-Identify"],
-      default: null,
+      default: "No",
     },
     disabilityCategories: [
       {
@@ -75,7 +75,7 @@ const WIOAQuestionnaireSchema = new Schema(
           "Learning Disability",
           "No Disability",
         ],
-        default: null,
+        default: "No Disability",
       },
     ],
     receivesSSDA: {
@@ -346,7 +346,7 @@ const WIOAQuestionnaireSchema = new Schema(
       default: null,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("WIOAQuestionnaire", WIOAQuestionnaireSchema);

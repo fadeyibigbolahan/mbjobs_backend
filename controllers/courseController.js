@@ -90,7 +90,7 @@ exports.updateCourse = async (req, res) => {
 
     // Remove undefined values
     Object.keys(updates).forEach(
-      (key) => updates[key] === undefined && delete updates[key]
+      (key) => updates[key] === undefined && delete updates[key],
     );
 
     const updatedCourse = await Course.findByIdAndUpdate(id, updates, {
@@ -182,7 +182,7 @@ exports.getCourseById = async (req, res) => {
         if (!course.allowedRoles.includes(user.role)) {
           canEnroll = false;
           enrollmentRequirements.push(
-            `Your role (${user.role}) is not allowed to enroll in this course`
+            `Your role (${user.role}) is not allowed to enroll in this course`,
           );
         }
       }
@@ -304,7 +304,7 @@ exports.enrollInCourse = async (req, res) => {
         });
 
         const hasSufficientProgress = userProgress.every(
-          (up) => up.progress >= course.minProgress
+          (up) => up.progress >= course.minProgress,
         );
 
         if (!hasSufficientProgress) {
@@ -416,7 +416,7 @@ exports.updateCourseProgress = async (req, res) => {
     }
 
     const moduleExists = course.modules.some(
-      (mod) => mod._id.toString() === moduleId
+      (mod) => mod._id.toString() === moduleId,
     );
     if (!moduleExists) {
       return res.status(400).json({
@@ -481,7 +481,7 @@ exports.updateCourseProgress = async (req, res) => {
         const completedCount = progressRecord.completedModules.length;
         const totalCount = course.modules.length;
         progressRecord.progress = Math.round(
-          (completedCount / totalCount) * 100
+          (completedCount / totalCount) * 100,
         );
       }
     }
@@ -560,241 +560,345 @@ exports.getAvailableCourses = async (req, res) => {
   }
 };
 
-// const Course = require("../models/Course");
-// const CourseProgress = require("../models/CourseProgress");
+/**
+ * Admin: Assign courses to one or multiple apprentices
+ * Allows admins to bypass enrollment requirements and directly assign courses
+ */
+exports.assignCoursesToApprentices = async (req, res) => {
+  try {
+    const { apprenticeIds, courseIds, bypassRequirements = false } = req.body;
+    const adminId = req.user._id;
 
-// // Admin - Create Course
-// exports.createCourse = async (req, res) => {
-//   try {
-//     // Optional: destructure or validate req.body here
-//     const courseData = {
-//       title: req.body.title,
-//       description: req.body.description,
-//       category: req.body.category,
-//       difficulty: req.body.difficulty,
-//       duration: req.body.duration,
-//       price: req.body.price,
-//       instructor: req.body.instructor,
-//       published: req.body.published,
-//       enrollments: req.body.enrollments || 0,
-//       rating: req.body.rating || 0,
-//       thumbnail: req.body.thumbnail,
-//       modules: req.body.modules,
-//       createdBy: req.user._id, // ensure this is injected by auth middleware
-//     };
+    // Validate admin
+    const admin = await User.findById(adminId);
+    if (!admin || admin.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can assign courses",
+      });
+    }
 
-//     console.log("Creating course with data:", courseData);
+    // Validate input
+    if (
+      !apprenticeIds ||
+      !apprenticeIds.length ||
+      !courseIds ||
+      !courseIds.length
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide apprenticeIds and courseIds",
+      });
+    }
 
-//     const course = new Course(courseData);
-//     await course.save();
+    // Convert to arrays if single values
+    const apprenticeIdArray = Array.isArray(apprenticeIds)
+      ? apprenticeIds
+      : [apprenticeIds];
+    const courseIdArray = Array.isArray(courseIds) ? courseIds : [courseIds];
 
-//     res.status(201).json({
-//       success: true,
-//       message: "Course created",
-//       course,
-//     });
-//   } catch (err) {
-//     console.error("Course creation error:", err);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error creating course",
-//       error: err.message,
-//     });
-//   }
-// };
+    // Validate all apprentices exist and are apprentices
+    const apprentices = await User.find({
+      _id: { $in: apprenticeIdArray },
+      role: "apprentice",
+    });
 
-// exports.updateCourse = async (req, res) => {
-//   try {
-//     const { id } = req.params;
+    if (apprentices.length !== apprenticeIdArray.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Some apprentices not found or are not apprentices",
+      });
+    }
 
-//     const course = await Course.findById(id);
-//     if (!course) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Course not found",
-//       });
-//     }
+    // Validate all courses exist
+    const courses = await Course.find({
+      _id: { $in: courseIdArray },
+    });
 
-//     // Optional: Check if the user is the creator or has permission
-//     // if (course.createdBy.toString() !== req.user._id.toString()) {
-//     //   return res.status(403).json({ success: false, message: "Unauthorized" });
-//     // }
+    if (courses.length !== courseIdArray.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Some courses not found",
+      });
+    }
 
-//     const updates = {
-//       title: req.body.title,
-//       description: req.body.description,
-//       category: req.body.category,
-//       difficulty: req.body.difficulty,
-//       duration: req.body.duration,
-//       price: req.body.price,
-//       instructor: req.body.instructor,
-//       published: req.body.published,
-//       enrollments: req.body.enrollments || 0,
-//       rating: req.body.rating || 0,
-//       thumbnail: req.body.thumbnail,
-//       modules: req.body.modules,
-//     };
+    const results = {
+      successfulAssignments: [],
+      failedAssignments: [],
+      skippedAssignments: [],
+    };
 
-//     const updatedCourse = await Course.findByIdAndUpdate(id, updates, {
-//       new: true,
-//     });
+    // Process each apprentice and course combination
+    for (const apprentice of apprentices) {
+      for (const course of courses) {
+        try {
+          // Check if already enrolled
+          const existingProgress = await CourseProgress.findOne({
+            course: course._id,
+            apprentice: apprentice._id,
+          });
 
-//     res.status(200).json({
-//       success: true,
-//       message: "Course updated",
-//       course: updatedCourse,
-//     });
-//   } catch (err) {
-//     console.error("Course update error:", err);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error updating course",
-//       error: err.message,
-//     });
-//   }
-// };
+          if (existingProgress) {
+            results.skippedAssignments.push({
+              apprenticeId: apprentice._id,
+              apprenticeName: apprentice.fullName,
+              courseId: course._id,
+              courseTitle: course.title,
+              reason: "Already enrolled",
+            });
+            continue;
+          }
 
-// // Get all courses
-// exports.getAllCourses = async (req, res) => {
-//   try {
-//     const courses = await Course.find().sort({ createdAt: -1 });
-//     res.status(200).json({ success: true, courses });
-//   } catch (err) {
-//     res.status(500).json({ success: false, message: "Error fetching courses" });
-//   }
-// };
+          // Check requirements unless bypassed
+          if (!bypassRequirements) {
+            // Check role restrictions
+            if (course.allowedRoles && course.allowedRoles.length > 0) {
+              if (!course.allowedRoles.includes(apprentice.role)) {
+                results.failedAssignments.push({
+                  apprenticeId: apprentice._id,
+                  apprenticeName: apprentice.fullName,
+                  courseId: course._id,
+                  courseTitle: course.title,
+                  reason: "Role not allowed for this course",
+                });
+                continue;
+              }
+            }
 
-// // Get course by ID
-// exports.getCourseById = async (req, res) => {
-//   try {
-//     const course = await Course.findById(req.params.id);
-//     if (!course) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Course not found" });
-//     }
-//     res.status(200).json({ success: true, course });
-//   } catch (err) {
-//     res.status(500).json({ success: false, message: "Error fetching course" });
-//   }
-// };
+            // Check WIOA requirement
+            if (
+              course.requiresWIOA &&
+              !apprentice.wioaQuestionnaire.completed
+            ) {
+              results.failedAssignments.push({
+                apprenticeId: apprentice._id,
+                apprenticeName: apprentice.fullName,
+                courseId: course._id,
+                courseTitle: course.title,
+                reason: "WIOA questionnaire not completed",
+              });
+              continue;
+            }
 
-// exports.enrollInCourse = async (req, res) => {
-//   const { id } = req.params; // course ID
-//   const userId = req.user._id;
+            // Check approval requirement
+            if (
+              course.requiresApproval &&
+              apprentice.approvalStatus !== "approved"
+            ) {
+              results.failedAssignments.push({
+                apprenticeId: apprentice._id,
+                apprenticeName: apprentice.fullName,
+                courseId: course._id,
+                courseTitle: course.title,
+                reason: "Apprentice not approved",
+              });
+              continue;
+            }
+          }
 
-//   try {
-//     // Check if already enrolled
-//     const existing = await CourseProgress.findOne({
-//       course: id,
-//       apprentice: userId,
-//     });
-//     if (existing) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Already enrolled in this course",
-//       });
-//     }
+          // Create course progress record
+          const progress = new CourseProgress({
+            course: course._id,
+            apprentice: apprentice._id,
+            assignedBy: adminId,
+            assignmentDate: new Date(),
+            isAdminAssigned: true,
+          });
+          await progress.save();
 
-//     // Save progress
-//     const progress = new CourseProgress({
-//       course: id,
-//       apprentice: userId,
-//     });
-//     await progress.save();
+          // Update course enrollment count
+          await Course.findByIdAndUpdate(course._id, {
+            $inc: { enrollments: 1 },
+          });
 
-//     // Increment enrollments count on Course
-//     await Course.findByIdAndUpdate(id, { $inc: { enrollments: 1 } });
+          results.successfulAssignments.push({
+            apprenticeId: apprentice._id,
+            apprenticeName: apprentice.fullName,
+            courseId: course._id,
+            courseTitle: course.title,
+          });
+        } catch (error) {
+          results.failedAssignments.push({
+            apprenticeId: apprentice._id,
+            apprenticeName: apprentice.fullName,
+            courseId: course._id,
+            courseTitle: course.title,
+            reason: error.message,
+          });
+        }
+      }
+    }
 
-//     res.status(201).json({
-//       success: true,
-//       message: "Enrolled successfully",
-//     });
-//   } catch (err) {
-//     console.error("Enrollment error:", err);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error enrolling in course",
-//     });
-//   }
-// };
+    res.status(200).json({
+      success: true,
+      message: "Course assignment completed",
+      results: {
+        totalAssignmentsAttempted:
+          apprenticeIdArray.length * courseIdArray.length,
+        successful: results.successfulAssignments.length,
+        failed: results.failedAssignments.length,
+        skipped: results.skippedAssignments.length,
+        details: {
+          successfulAssignments: results.successfulAssignments,
+          failedAssignments: results.failedAssignments,
+          skippedAssignments: results.skippedAssignments,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error assigning courses:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error assigning courses",
+      error: error.message,
+    });
+  }
+};
 
-// exports.getMyCourses = async (req, res) => {
-//   const userId = req.user._id;
-//   console.log("Fetching courses for user:", userId);
-//   try {
-//     const courses = await CourseProgress.find({ apprentice: userId }).populate(
-//       "course"
-//     );
+/**
+ * Get all apprentices with their assigned courses
+ * Admin only - view all apprentices and their course progress
+ */
+exports.getApprenticesWithCourses = async (req, res) => {
+  try {
+    const adminId = req.user._id;
 
-//     res.status(200).json({ success: true, courses });
-//   } catch (err) {
-//     res
-//       .status(500)
-//       .json({ success: false, message: "Error fetching your courses" });
-//   }
-// };
+    // Validate admin
+    const admin = await User.findById(adminId);
+    if (!admin || admin.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can view all apprentices with courses",
+      });
+    }
 
-// exports.updateCourseProgress = async (req, res) => {
-//   const { id: courseId } = req.params; // course ID
-//   const { moduleId } = req.body; // completed module ID
-//   const userId = req.user._id;
+    const { search, approvalStatus, hasWIOA, page = 1, limit = 20 } = req.query;
+    const skip = (page - 1) * limit;
 
-//   try {
-//     const course = await Course.findById(courseId);
-//     if (!course) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Course not found" });
-//     }
+    // Build filter for apprentices
+    let filter = { role: "apprentice" };
 
-//     const moduleExists = course.modules.some(
-//       (mod) => mod._id.toString() === moduleId
-//     );
-//     if (!moduleExists) {
-//       return res
-//         .status(400)
-//         .json({ success: false, message: "Invalid module ID" });
-//     }
+    if (search) {
+      filter.$or = [
+        { fullName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+      ];
+    }
 
-//     let progressRecord = await CourseProgress.findOne({
-//       course: courseId,
-//       apprentice: userId,
-//     });
+    if (approvalStatus) {
+      filter.approvalStatus = approvalStatus;
+    }
 
-//     if (!progressRecord) {
-//       // Automatically enroll user if not found
-//       progressRecord = new CourseProgress({
-//         course: courseId,
-//         apprentice: userId,
-//         completedModules: [moduleId],
-//         progress: (1 / course.modules.length) * 100,
-//       });
-//     } else {
-//       if (!progressRecord.completedModules.includes(moduleId)) {
-//         progressRecord.completedModules.push(moduleId);
-//         const completedCount = progressRecord.completedModules.length;
-//         const totalCount = course.modules.length;
-//         progressRecord.progress = Math.round(
-//           (completedCount / totalCount) * 100
-//         );
-//       }
-//     }
+    if (hasWIOA === "true") {
+      filter["wioaQuestionnaire.completed"] = true;
+    } else if (hasWIOA === "false") {
+      filter["wioaQuestionnaire.completed"] = false;
+    }
 
-//     await progressRecord.save();
+    // Get apprentices with pagination
+    const apprentices = await User.find(filter)
+      .select(
+        "fullName email phone approvalStatus wioaQuestionnaire subscription regionEligibility createdAt",
+      )
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
 
-//     res.status(200).json({
-//       success: true,
-//       message: "Progress updated",
-//       progress: progressRecord.progress,
-//       completedModules: progressRecord.completedModules,
-//     });
-//   } catch (err) {
-//     console.error("Error updating progress:", err);
-//     res.status(500).json({
-//       success: false,
-//       message: "Error updating progress",
-//       error: err.message,
-//     });
-//   }
-// };
+    // Get course progress for these apprentices
+    const apprenticeIds = apprentices.map((apprentice) => apprentice._id);
+    const courseProgress = await CourseProgress.find({
+      apprentice: { $in: apprenticeIds },
+    })
+      .populate("course", "title category difficulty duration")
+      .populate("assignedBy", "fullName email");
+
+    // Group course progress by apprentice
+    const progressByApprentice = {};
+    courseProgress.forEach((progress) => {
+      if (!progressByApprentice[progress.apprentice]) {
+        progressByApprentice[progress.apprentice] = [];
+      }
+      progressByApprentice[progress.apprentice].push(progress);
+    });
+
+    // Combine apprentice data with their courses
+    const apprenticesWithCourses = apprentices.map((apprentice) => ({
+      ...apprentice.toObject(),
+      courses: progressByApprentice[apprentice._id] || [],
+      courseCount: (progressByApprentice[apprentice._id] || []).length,
+    }));
+
+    const total = await User.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      data: apprenticesWithCourses,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching apprentices with courses:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching apprentices with courses",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Admin: Remove course assignment from apprentice
+ */
+exports.removeCourseAssignment = async (req, res) => {
+  try {
+    const { assignmentId } = req.params;
+    const adminId = req.user._id;
+
+    // Validate admin
+    const admin = await User.findById(adminId);
+    if (!admin || admin.role !== "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins can remove course assignments",
+      });
+    }
+
+    // Find and remove the course progress record
+    const progress = await CourseProgress.findById(assignmentId);
+    if (!progress) {
+      return res.status(404).json({
+        success: false,
+        message: "Course assignment not found",
+      });
+    }
+
+    // Decrease enrollment count on the course
+    await Course.findByIdAndUpdate(progress.course, {
+      $inc: { enrollments: -1 },
+    });
+
+    // Remove the progress record
+    await progress.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: "Course assignment removed successfully",
+      data: {
+        apprenticeId: progress.apprentice,
+        courseId: progress.course,
+        removedAt: new Date(),
+      },
+    });
+  } catch (error) {
+    console.error("Error removing course assignment:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error removing course assignment",
+      error: error.message,
+    });
+  }
+};

@@ -9,6 +9,9 @@ const {
   getMyCourses,
   updateCourseProgress,
   getAvailableCourses,
+  assignCoursesToApprentices,
+  getApprenticesWithCourses,
+  removeCourseAssignment,
 } = require("../controllers/courseController");
 
 const { userAuth, checkRole } = require("../utils/Auth");
@@ -17,6 +20,28 @@ const checkCourseAccess = require("../middlewares/courseAccess");
 // Admin creates course
 router.post("/", userAuth, checkRole(["admin"]), createCourse);
 router.put("/:id", userAuth, checkRole(["admin"]), updateCourse);
+
+// Admin course assignment routes
+router.post(
+  "/assign",
+  userAuth,
+  checkRole(["admin"]),
+  assignCoursesToApprentices,
+);
+
+router.get(
+  "/apprentices/with-courses",
+  userAuth,
+  checkRole(["admin"]),
+  getApprenticesWithCourses,
+);
+
+router.delete(
+  "/assign/:assignmentId",
+  userAuth,
+  checkRole(["admin"]),
+  removeCourseAssignment,
+);
 
 // View courses - available to all authenticated users but filtered based on role/approval
 router.get("/", userAuth, checkCourseAccess, getAllCourses);
@@ -29,55 +54,21 @@ router.post(
   userAuth,
   checkRole(["apprentice"]),
   checkCourseAccess,
-  enrollInCourse
+  enrollInCourse,
 );
 router.get(
-  "/my/course",
+  "/my/courses",
   userAuth,
   checkRole(["apprentice"]),
   checkCourseAccess,
-  getMyCourses
+  getMyCourses,
 );
 router.post(
   "/:id/progress",
   userAuth,
   checkRole(["apprentice"]),
   checkCourseAccess,
-  updateCourseProgress
+  updateCourseProgress,
 );
 
 module.exports = router;
-
-// const express = require("express");
-// const router = express.Router();
-// const {
-//   createCourse,
-//   updateCourse,
-//   getAllCourses,
-//   getCourseById,
-//   enrollInCourse,
-//   getMyCourses,
-//   updateCourseProgress,
-// } = require("../controllers/courseController");
-
-// const { userAuth, checkRole } = require("../utils/Auth");
-
-// // Admin creates course
-// router.post("/", userAuth, checkRole(["admin"]), createCourse);
-// router.put("/:id", userAuth, checkRole(["admin"]), updateCourse);
-
-// // View courses
-// router.get("/", getAllCourses);
-// router.get("/:id", getCourseById);
-
-// // Apprentice features
-// router.post("/:id/enroll", userAuth, checkRole(["apprentice"]), enrollInCourse);
-// router.get("/my/course", userAuth, checkRole(["apprentice"]), getMyCourses);
-// router.post(
-//   "/:id/progress",
-//   userAuth,
-//   checkRole(["apprentice"]),
-//   updateCourseProgress
-// );
-
-// module.exports = router;

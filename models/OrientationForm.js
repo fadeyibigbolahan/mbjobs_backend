@@ -1,3 +1,4 @@
+// models/OrientationForm.js
 const mongoose = require("mongoose");
 
 const orientationFormSchema = new mongoose.Schema(
@@ -76,10 +77,17 @@ const orientationFormSchema = new mongoose.Schema(
       required: true,
       default: false,
     },
+    // ADD THIS: Categories field to store selected categories
+    selectedCategories: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Category",
+      },
+    ],
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Index for better query performance

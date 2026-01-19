@@ -21,8 +21,24 @@ const CourseProgressSchema = new Schema(
         type: Schema.Types.ObjectId,
       },
     ],
+    // Add these fields for admin assignment tracking
+    assignedBy: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
+    assignmentDate: {
+      type: Date,
+    },
+    isAdminAssigned: {
+      type: Boolean,
+      default: false,
+    },
+    // Optional: Add notes about the assignment
+    assignmentNotes: {
+      type: String,
+    },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = model("CourseProgress", CourseProgressSchema);
