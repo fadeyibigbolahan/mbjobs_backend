@@ -21,6 +21,9 @@ const {
   userAuth,
 } = require("../utils/Auth");
 
+// Import the upload middleware
+const { handleFileUpload } = require("../middlewares/uploadMiddleware");
+
 // Add formatDate function right after imports
 const formatDate = (date) => {
   try {
@@ -66,7 +69,7 @@ const storage = multer.diskStorage({
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     cb(
       null,
-      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname)
+      file.fieldname + "-" + uniqueSuffix + path.extname(file.originalname),
     );
   },
 });
@@ -126,11 +129,11 @@ router.get("/me", userAuth, getMyProfile);
 router.patch(
   "/me",
   userAuth,
-  upload.fields([
+  handleFileUpload([
     { name: "profileImage", maxCount: 1 },
     { name: "companyLogo", maxCount: 1 },
   ]),
-  updateMyProfile
+  updateMyProfile,
 );
 
 // Update employer profile
@@ -138,8 +141,8 @@ router.put(
   "/employer/profile",
   userAuth,
   checkRole(["employer"]),
-  upload.single("companyLogo"), // optional logo upload
-  updateEmployerProfile
+  handleFileUpload([{ name: "companyLogo", maxCount: 1 }]), // Use this instead
+  updateEmployerProfile,
 );
 
 // ==================== APPRENTICE DASHBOARD ROUTES ====================
@@ -298,6 +301,58 @@ router.get("/recent-applications", userAuth, async (req, res) => {
   }
 });
 
+// Delete profile image
+router.delete("/me/profile-image", userAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (user.profileImage?.public_id) {
+      const { deleteFromCloudinary } = require("../utils/cloudinary");
+      await deleteFromCloudinary(user.profileImage.public_id);
+
+      user.profileImage = { url: "", public_id: "" };
+      await user.save();
+    }
+
+    res.json({
+      success: true,
+      message: "Profile image deleted successfully",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error deleting profile image",
+      error: error.message,
+    });
+  }
+});
+
+// Delete company logo
+router.delete("/me/company-logo", userAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+
+    if (user.companyLogo?.public_id) {
+      const { deleteFromCloudinary } = require("../utils/cloudinary");
+      await deleteFromCloudinary(user.companyLogo.public_id);
+
+      user.companyLogo = { url: "", public_id: "" };
+      await user.save();
+    }
+
+    res.json({
+      success: true,
+      message: "Company logo deleted successfully",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error deleting company logo",
+      error: error.message,
+    });
+  }
+});
+
 // ==================== UTILITY ROUTES ====================
 
 // Debug route to test multer (you can remove this later)
@@ -316,7 +371,7 @@ router.post(
       files: req.files,
       message: "Test upload successful",
     });
-  }
+  },
 );
 
 module.exports = router;

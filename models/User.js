@@ -40,8 +40,14 @@ const UserSchema = new Schema(
       required: true,
     },
     profileImage: {
-      type: String, // Store the file URL or path
-      default: "",
+      url: {
+        type: String,
+        default: "",
+      },
+      public_id: {
+        type: String,
+        default: "",
+      },
     },
     role: {
       type: String,
@@ -109,8 +115,14 @@ const UserSchema = new Schema(
       default: "",
     },
     companyLogo: {
-      type: String, // URL or path to the logo image
-      default: "",
+      url: {
+        type: String,
+        default: "",
+      },
+      public_id: {
+        type: String,
+        default: "",
+      },
     },
     bio: {
       type: String,
@@ -184,8 +196,32 @@ const UserSchema = new Schema(
     },
     rejectionReason: String,
   },
-  { timestamps: true }
+  { timestamps: true },
 );
+
+// Add a method to delete images from Cloudinary when user is deleted
+UserSchema.pre("remove", async function (next) {
+  try {
+    const {
+      deleteFromCloudinary,
+      extractPublicId,
+    } = require("../utils/cloudinary");
+
+    // Delete profile image if exists
+    if (this.profileImage.public_id) {
+      await deleteFromCloudinary(this.profileImage.public_id);
+    }
+
+    // Delete company logo if exists
+    if (this.companyLogo.public_id) {
+      await deleteFromCloudinary(this.companyLogo.public_id);
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Add a method to check if subscription is expired
 UserSchema.methods.isSubscriptionExpired = function () {

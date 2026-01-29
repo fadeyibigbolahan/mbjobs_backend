@@ -1,4 +1,8 @@
 const User = require("../models/User");
+const {
+  deleteFromCloudinary,
+  extractPublicId,
+} = require("../utils/cloudinary");
 
 // GET /user/me
 exports.getMyProfile = async (req, res) => {
@@ -21,20 +25,52 @@ exports.getMyProfile = async (req, res) => {
   }
 };
 
-// controllers/employerController.js
+// Update employer profile with Cloudinary
 exports.updateEmployerProfile = async (req, res) => {
   try {
     console.log("Update employer profile called");
     const { companyName, bio, phone, email } = req.body;
     const updateData = { companyName, bio, phone, email };
 
-    if (req.file) {
-      updateData.companyLogo = req.file.path; // assuming you're uploading a file
+    // Handle company logo upload if exists
+    if (req.fileData?.companyLogo) {
+      // Get current user data first
+      const currentUser = await User.findById(req.user._id);
+
+      // Check and migrate old string format to new object format
+      if (
+        currentUser.companyLogo &&
+        typeof currentUser.companyLogo === "string"
+      ) {
+        currentUser.companyLogo = {
+          url: currentUser.companyLogo || "",
+          public_id: currentUser.companyLogo
+            ? extractPublicId(currentUser.companyLogo) || ""
+            : "",
+        };
+      }
+
+      // Delete old logo if exists and has public_id
+      if (
+        currentUser.companyLogo?.public_id &&
+        currentUser.companyLogo.public_id !== ""
+      ) {
+        try {
+          await deleteFromCloudinary(currentUser.companyLogo.public_id);
+        } catch (error) {
+          console.error("Error deleting old company logo:", error);
+        }
+      }
+
+      updateData.companyLogo = {
+        url: req.fileData.companyLogo.url,
+        public_id: req.fileData.companyLogo.public_id,
+      };
     }
 
     const updatedUser = await User.findByIdAndUpdate(req.user._id, updateData, {
       new: true,
-    });
+    }).select("-password");
 
     res.status(200).json({
       success: true,
@@ -50,7 +86,7 @@ exports.updateEmployerProfile = async (req, res) => {
   }
 };
 
-// PATCH /user/me
+// PATCH /user/me - Main profile update function
 exports.updateMyProfile = async (req, res) => {
   try {
     const {
@@ -66,6 +102,7 @@ exports.updateMyProfile = async (req, res) => {
 
     console.log("Update profile called");
     console.log("Request body:", req.body);
+    console.log("File data from middleware:", req.fileData);
 
     const user = await User.findById(req.user._id);
     if (!user) {
@@ -73,6 +110,47 @@ exports.updateMyProfile = async (req, res) => {
         success: false,
         message: "User not found",
       });
+    }
+
+    // ✅ DEBUG: Check current user data structure
+    console.log("Current user data BEFORE migration:");
+    console.log("profileImage type:", typeof user.profileImage);
+    console.log("profileImage value:", user.profileImage);
+    console.log("companyLogo type:", typeof user.companyLogo);
+    console.log("companyLogo value:", user.companyLogo);
+
+    // ✅ CRITICAL FIX: Convert string format to object format if needed
+    // This must happen before ANY operation on these fields
+    if (user.profileImage === "" || typeof user.profileImage === "string") {
+      console.log("Migrating profileImage from string to object");
+      if (user.profileImage && user.profileImage !== "") {
+        user.profileImage = {
+          url: user.profileImage,
+          public_id: extractPublicId(user.profileImage) || "",
+        };
+      } else {
+        // Initialize as empty object for new structure
+        user.profileImage = {
+          url: "",
+          public_id: "",
+        };
+      }
+    }
+
+    if (user.companyLogo === "" || typeof user.companyLogo === "string") {
+      console.log("Migrating companyLogo from string to object");
+      if (user.companyLogo && user.companyLogo !== "") {
+        user.companyLogo = {
+          url: user.companyLogo,
+          public_id: extractPublicId(user.companyLogo) || "",
+        };
+      } else {
+        // Initialize as empty object for new structure
+        user.companyLogo = {
+          url: "",
+          public_id: "",
+        };
+      }
     }
 
     // ✅ Email uniqueness check
@@ -142,15 +220,52 @@ exports.updateMyProfile = async (req, res) => {
       if (bio) user.bio = bio;
     }
 
-    // ✅ Handle uploaded files
-    if (req.files?.profileImage) {
-      console.log("Profile image uploaded:", req.files.profileImage[0]);
-      user.profileImage = req.files.profileImage[0].path;
+    // ✅ Handle uploaded files from Cloudinary - PROFILE IMAGE
+    if (req.fileData?.profileImage) {
+      console.log(
+        "Profile image uploaded to Cloudinary:",
+        req.fileData.profileImage,
+      );
+
+      // Delete old profile image from Cloudinary if exists
+      if (user.profileImage?.public_id && user.profileImage.public_id !== "") {
+        try {
+          await deleteFromCloudinary(user.profileImage.public_id);
+        } catch (error) {
+          console.error("Error deleting old profile image:", error);
+          // Continue even if deletion fails
+        }
+      }
+
+      // Update with new Cloudinary data
+      user.profileImage = {
+        url: req.fileData.profileImage.url,
+        public_id: req.fileData.profileImage.public_id,
+      };
     }
 
-    if (req.files?.companyLogo) {
-      console.log("Company logo uploaded:", req.files.companyLogo[0]);
-      user.companyLogo = req.files.companyLogo[0].path;
+    // ✅ Handle uploaded files from Cloudinary - COMPANY LOGO
+    if (req.fileData?.companyLogo) {
+      console.log(
+        "Company logo uploaded to Cloudinary:",
+        req.fileData.companyLogo,
+      );
+
+      // Delete old company logo from Cloudinary if exists
+      if (user.companyLogo?.public_id && user.companyLogo.public_id !== "") {
+        try {
+          await deleteFromCloudinary(user.companyLogo.public_id);
+        } catch (error) {
+          console.error("Error deleting old company logo:", error);
+          // Continue even if deletion fails
+        }
+      }
+
+      // Update with new Cloudinary data
+      user.companyLogo = {
+        url: req.fileData.companyLogo.url,
+        public_id: req.fileData.companyLogo.public_id,
+      };
     }
 
     console.log("Saving user with data:", {
@@ -163,6 +278,8 @@ exports.updateMyProfile = async (req, res) => {
       apprenticeCategories: user.apprenticeCategories,
       companyName: user.companyName,
       bio: user.bio,
+      profileImage: user.profileImage,
+      companyLogo: user.companyLogo,
     });
 
     await user.save();
@@ -186,12 +303,17 @@ exports.updateMyProfile = async (req, res) => {
         companyName: user.companyName,
         bio: user.bio,
         apprenticeCategories: user.apprenticeCategories,
-        profileImage: user.profileImage,
-        companyLogo: user.companyLogo,
+        profileImage: user.profileImage?.url || "",
+        companyLogo: user.companyLogo?.url || "",
       },
     });
   } catch (err) {
     console.error("Update profile error:", err);
+    console.error("Full error details:", {
+      message: err.message,
+      code: err.code,
+      stack: err.stack,
+    });
     res.status(500).json({
       success: false,
       message: err.message || "Internal server error",
