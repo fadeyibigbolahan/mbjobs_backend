@@ -119,39 +119,39 @@ exports.updateMyProfile = async (req, res) => {
     console.log("companyLogo type:", typeof user.companyLogo);
     console.log("companyLogo value:", user.companyLogo);
 
-    // ✅ CRITICAL FIX: Convert string format to object format if needed
-    // This must happen before ANY operation on these fields
-    if (user.profileImage === "" || typeof user.profileImage === "string") {
-      console.log("Migrating profileImage from string to object");
-      if (user.profileImage && user.profileImage !== "") {
-        user.profileImage = {
-          url: user.profileImage,
-          public_id: extractPublicId(user.profileImage) || "",
-        };
-      } else {
-        // Initialize as empty object for new structure
-        user.profileImage = {
-          url: "",
-          public_id: "",
-        };
+    // ✅ FIXED: Ensure profileImage and companyLogo are proper objects
+    // Handle both string and object formats safely
+    const ensureImageObject = (fieldValue) => {
+      if (!fieldValue || fieldValue === "") {
+        return { url: "", public_id: "" };
       }
-    }
 
-    if (user.companyLogo === "" || typeof user.companyLogo === "string") {
-      console.log("Migrating companyLogo from string to object");
-      if (user.companyLogo && user.companyLogo !== "") {
-        user.companyLogo = {
-          url: user.companyLogo,
-          public_id: extractPublicId(user.companyLogo) || "",
-        };
-      } else {
-        // Initialize as empty object for new structure
-        user.companyLogo = {
-          url: "",
-          public_id: "",
+      if (typeof fieldValue === "string") {
+        return {
+          url: fieldValue,
+          public_id: extractPublicId(fieldValue) || "",
         };
       }
-    }
+
+      // Already an object, ensure it has the right structure
+      if (typeof fieldValue === "object") {
+        return {
+          url: fieldValue.url || "",
+          public_id: fieldValue.public_id || "",
+        };
+      }
+
+      // Fallback
+      return { url: "", public_id: "" };
+    };
+
+    // Apply the fix to both fields
+    user.profileImage = ensureImageObject(user.profileImage);
+    user.companyLogo = ensureImageObject(user.companyLogo);
+
+    console.log("After ensuring object structure:");
+    console.log("profileImage:", user.profileImage);
+    console.log("companyLogo:", user.companyLogo);
 
     // ✅ Email uniqueness check
     if (email && email !== user.email) {
@@ -266,6 +266,14 @@ exports.updateMyProfile = async (req, res) => {
         url: req.fileData.companyLogo.url,
         public_id: req.fileData.companyLogo.public_id,
       };
+    }
+
+    // ✅ CRITICAL: Final check before saving - ensure both fields are objects
+    if (!user.profileImage || typeof user.profileImage !== "object") {
+      user.profileImage = { url: "", public_id: "" };
+    }
+    if (!user.companyLogo || typeof user.companyLogo !== "object") {
+      user.companyLogo = { url: "", public_id: "" };
     }
 
     console.log("Saving user with data:", {

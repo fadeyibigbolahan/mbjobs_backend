@@ -23,16 +23,58 @@ router.post("/create-checkout-session", userAuth, async (req, res) => {
       return res.status(400).json({ error: "Invalid subscription period" });
     }
 
+    // 🚨 IMPORTANT: Handle free plan differently
+    if (plan.title === "Free" || plan.monthlyPrice === 0) {
+      // Activate free plan immediately without Stripe
+      const user = await User.findById(req.user._id);
+
+      // Set subscription end date (e.g., 30 days for trial, or indefinite)
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setMonth(endDate.getMonth() + 1); // Free plan for 1 month
+
+      // Update user subscription
+      const updateData = {
+        $set: {
+          subscription: {
+            planId: planId,
+            startDate: startDate,
+            endDate: endDate,
+            status: "active",
+            planTitle: plan.title,
+            periodLabel: period.label,
+            totalPaid: 0,
+            autoRenew: false,
+            isFreePlan: true, // Mark as free plan
+          },
+          role: "employer",
+          approvalStatus: "approved",
+          approvalDate: new Date(),
+        },
+      };
+
+      await User.findByIdAndUpdate(req.user._id, updateData, {
+        new: true,
+        runValidators: true,
+      });
+
+      return res.json({
+        success: true,
+        isFreePlan: true,
+        message: "Free plan activated successfully!",
+        redirectUrl: "/dashboard/user-profile", // Redirect to dashboard
+      });
+    }
+
+    // For paid plans, continue with Stripe checkout...
     // Calculate price with discount - ensure it's not zero
     const discountedPrice = plan.monthlyPrice * (1 - period.discount / 100);
     const totalPrice = Math.round(discountedPrice * period.months * 100); // Convert to cents
 
     // Validate that the price is above Stripe's minimum
     if (totalPrice < 50) {
-      // Stripe minimum is $0.50 (50 cents)
       return res.status(400).json({
-        error:
-          "The selected plan amount is below the minimum required amount. Please choose a different plan or period.",
+        error: "Invalid price amount. Please contact support.",
       });
     }
 
@@ -46,7 +88,7 @@ router.post("/create-checkout-session", userAuth, async (req, res) => {
       totalPriceDollars: totalPrice / 100,
     });
 
-    // Create Stripe checkout session
+    // Create Stripe checkout session for PAID plans only
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       line_items: [
@@ -240,7 +282,7 @@ router.get("/verify-payment/:sessionId", userAuth, async (req, res) => {
       }
 
       endDate.setMonth(
-        startDate.getMonth() + parseInt(session.metadata.months)
+        startDate.getMonth() + parseInt(session.metadata.months),
       );
 
       // Update user subscription
@@ -268,7 +310,7 @@ router.get("/verify-payment/:sessionId", userAuth, async (req, res) => {
       const updatedUser = await User.findByIdAndUpdate(
         req.user._id,
         updateData,
-        { new: true, runValidators: true }
+        { new: true, runValidators: true },
       ).select("-password");
 
       const message =
@@ -308,7 +350,7 @@ router.get("/verify-payment/:sessionId", userAuth, async (req, res) => {
 router.get("/current", userAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate(
-      "subscription.planId"
+      "subscription.planId",
     );
 
     if (!user) {
@@ -350,7 +392,7 @@ router.post("/cancel", userAuth, async (req, res) => {
           "subscription.autoRenew": false,
         },
       },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     res.json({
@@ -379,7 +421,7 @@ router.post("/enable-auto-renew", userAuth, async (req, res) => {
           "subscription.autoRenew": true,
         },
       },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     res.json({
@@ -408,7 +450,7 @@ router.post("/disable-auto-renew", userAuth, async (req, res) => {
           "subscription.autoRenew": false,
         },
       },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     res.json({
@@ -479,8 +521,8 @@ router.get("/status", userAuth, async (req, res) => {
       status: hasActiveSubscription
         ? "active"
         : isExpired
-        ? "expired"
-        : "inactive",
+          ? "expired"
+          : "inactive",
       isExpired,
       canRenew: !!user.subscription, // Can renew if they have any subscription history
       autoRenew: user.subscription?.autoRenew || false,
